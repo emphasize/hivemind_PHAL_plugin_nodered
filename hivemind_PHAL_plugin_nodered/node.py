@@ -7,13 +7,12 @@ from ovos_plugin_manager.phal import PHALPlugin
 from ovos_bus_client.message import Message
 from ovos_utils.process_utils import RuntimeRequirements
 from ovos_utils.log import LOG
-from ovos_config.locations import xdg_data_home
+from ovos_config.locations import xdg_data_home, xdg_config_home
 from tornado import web, ioloop
 from tornado.platform.asyncio import AnyThreadEventLoopPolicy
 from hivemind_bus_client.message import HiveMessage
 from hivemind_core.protocol import (
     HiveMindListenerProtocol,
-    HiveMindListenerInternalProtocol,
     HiveMindClientConnection
 )
 from hivemind_core.database import ClientDatabase
@@ -22,7 +21,6 @@ from hivemind_core.service import (
     create_self_signed_cert
 )
 from ovos_utils import classproperty
-
 
 ROUTING_MSG = ["node_red.answer",
                "node_red.speak",
@@ -35,17 +33,27 @@ ROUTING_MSG = ["node_red.answer",
                "node_red.listen"]
 
 
+class NodeRedMindValidator:
+    @staticmethod
+    def validate(config=None):
+        """ this method is called before loading the plugin.
+        If it returns False the plugin is not loaded.
+        This allows a plugin to run platform checks"""
+        return True
+
+
 class NodeRedMind(PHALPlugin):
+    validator = NodeRedMindValidator
 
     def __init__(self, bus=None, config=None):
         super().__init__(bus=bus,
                          name="hivemind-PHAL-plugin-nodered",
                          config=config)
 
-        self.host = self.config.get('host', '127.0.0.1')
+        self.host = self.config.get('host', '0.0.0.0')
         self.port = self.config.get('port', 6789)
         route = "/"
-        
+
         asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
         loop = ioloop.IOLoop.current()
         self.protocol = NodeRedListenerProtocol(loop=loop)
@@ -54,9 +62,10 @@ class NodeRedMind(PHALPlugin):
 
         routes = [(route, MessageBusEventHandler)]
         self.listener = web.Application(routes)
-        
+
         self.start_mind()
-    
+        loop.start()
+
     @classproperty
     def runtime_requirements(self):
         return RuntimeRequirements(internet_before_load=False,
@@ -65,10 +74,10 @@ class NodeRedMind(PHALPlugin):
                                    requires_network=True,
                                    no_internet_fallback=True,
                                    no_network_fallback=False)
-    
+
     @property
     def ssl_opts(self):
-        cert_dir = self.config.get("cert_dir", f"{xdg_data_home()}/hivemind")
+        cert_dir = self.config.get("cert_dir", f"{xdg_data_home()}/HiveMind")
         cert_name = self.config.get("cert_name", "nodered")
         CERT_FILE = f"{cert_dir}/{cert_name}.crt"
         KEY_FILE = f"{cert_dir}/{cert_name}.key"
@@ -84,7 +93,7 @@ class NodeRedMind(PHALPlugin):
             self.listener.listen(self.port, self.host, ssl_options=self.ssl_opts)
         else:
             self.listener.listen(self.port, self.host)
-    
+
     def handle_credentials(self):
         user = self.config.get("username", "nodered")
         with ClientDatabase() as db:
@@ -99,7 +108,10 @@ class NodeRedMind(PHALPlugin):
                               password=password)
                 LOG.info(f"Created new user: {user}"
                          f", pw:{password}, key:{access_key}")
-    
+
+        # create a config folder
+        os.makedirs(f"{xdg_config_home()}/hivemind", exist_ok=True)
+
     def shutdown(self):
         super().shutdown()
         self.join()
@@ -128,15 +140,13 @@ class NodeRedListenerProtocol(HiveMindListenerProtocol):
             client: HiveMindClientConnection = self.clients[peer]["instance"]
             client.send(payload.encode())
 
-
     # HiveMind protocol messages -  from node red
     def handle_message(self,
                        message: HiveMessage,
                        client: HiveMindClientConnection):
         """
-       Process message from client, decide what to do internally here
-       """
-        #client_protocol, ip, sock_num = self.client.peer.split(":")
+        Process message from client, decide what to do internally here
+        """
 
         if isinstance(message, HiveMessage):
             data = message.as_dict.get("payload", dict())
@@ -154,7 +164,7 @@ class NodeRedListenerProtocol(HiveMindListenerProtocol):
                 data["context"]["destination"] = "skills"
             elif msg_type in ['node_red.answer', 'node_red.speak']:
                 msg_type = "speak"
-            elif msg_type  == 'node_red.tts':
+            elif msg_type == 'node_red.tts':
                 msg_type = "speak"
                 data["context"]["destination"] = ["audio"]
             elif msg_type == 'node_red.listen':
@@ -164,11 +174,11 @@ class NodeRedListenerProtocol(HiveMindListenerProtocol):
                 data["context"]["destination"] = None
             else:
                 data["context"]["destination"] = "skills"
-            
+
             self.handle_inject_mycroft_msg(Message(msg_type,
                                                    data["data"],
                                                    data["context"]), client)
-            
+
             if msg_type in ['node_red.answer', 'node_red.speak', 'node_red.tts']:
                 self.handle_inject_mycroft_msg(Message("node_red.success",
                                                        data["data"],
@@ -220,7 +230,7 @@ class NodeRedListenerProtocol(HiveMindListenerProtocol):
     def handle_outgoing_mycroft(self, message=None):
         if not message:
             return LOG.error("No message to send")
-            
+
         if isinstance(message, dict):
             message = json.dumps(message)
         if isinstance(message, str):
@@ -230,10 +240,10 @@ class NodeRedListenerProtocol(HiveMindListenerProtocol):
 
         message.context = message.context or {}
         peer = message.context.get("destination")
-        
+
         # if msg_type namespace is node_red
         if message.msg_type.startswith("play:query"):
-           LOG.debug(message.serialize())
+            LOG.debug(message.serialize())
         # if message is for a node red connection, forward
         if message.msg_type.startswith("node_red."):
             self.nodered_send(message)
