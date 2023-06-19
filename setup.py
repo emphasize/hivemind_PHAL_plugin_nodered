@@ -94,7 +94,7 @@ if config is not None:
     config.merge(
         {
             "PHAL": {
-                "hivemind_PHAL_plugin_nodered": {
+                "hivemind-PHAL-plugin-nodered": {
                     "ssl": False,
                     "blacklist" : {
                         "messages": [],
