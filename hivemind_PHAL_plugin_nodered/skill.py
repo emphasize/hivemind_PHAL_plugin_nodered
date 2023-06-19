@@ -13,8 +13,7 @@ from ovos_utils import classproperty, create_daemon
 class NodeRedSkill(FallbackSkill):
     def __init__(self):
         super(NodeRedSkill, self).__init__(name='NodeRedSkill')
-        # can not reload, twisted reactor can not be restarted
-        self.reload_skill = False            
+        # self.reload_skill = False            
         self.waiting_for_node = False
         self.conversing = False
         self._error = None

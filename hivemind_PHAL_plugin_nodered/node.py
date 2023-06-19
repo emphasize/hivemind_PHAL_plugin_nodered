@@ -1,4 +1,5 @@
 import json
+import asyncio
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -7,7 +8,8 @@ from ovos_bus_client.message import Message
 from ovos_utils.process_utils import RuntimeRequirements
 from ovos_utils.log import LOG
 from ovos_config.locations import xdg_data_home
-from tornado import web
+from tornado import web, ioloop
+from tornado.platform.asyncio import AnyThreadEventLoopPolicy
 from hivemind_bus_client.message import HiveMessage
 from hivemind_core.protocol import (
     HiveMindListenerProtocol,
@@ -36,17 +38,19 @@ ROUTING_MSG = ["node_red.answer",
 class NodeRedMind(PHALPlugin):
 
     def __init__(self, bus=None, config=None):
-        super().__init__(bus=bus, name="ovos-PHAL-plugin-cec", config=config)
+        super().__init__(bus=bus,
+                         name="hivemind-PHAL-plugin-nodered",
+                         config=config)
 
         self.host = self.config.get('host', '127.0.0.1')
         self.port = self.config.get('port', 6789)
         route = "/"
-
-        self.protocol = NodeRedListenerProtocol()
+        
+        asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
+        loop = ioloop.IOLoop.current()
+        self.protocol = NodeRedListenerProtocol(loop=loop)
         self.protocol.bind(MessageBusEventHandler, self.bus)
         self.use_ssl = self.config.get("ssl", False)
-        # if self.config.get("use_ssl"):
-        #     self.protocol.load_ssl_config(self.config)
 
         routes = [(route, MessageBusEventHandler)]
         self.listener = web.Application(routes)
@@ -111,9 +115,7 @@ class NodeRedListenerProtocol(HiveMindListenerProtocol):
     # parsed protocol messages
     def nodered_send(self, message):
         if isinstance(message, Message):
-            payload = json.dumps({'msg_type': message.msg_type,
-                                  'data': message.data,
-                                  'context': message.context})
+            payload = message.serialize()
         elif isinstance(message, dict):
             payload = repr(json.dumps(message))
         else:
