@@ -87,16 +87,18 @@ class NodeRedMind(PHALPlugin):
     
     def handle_credentials(self):
         user = self.config.get("username", "nodered")
-        if not ClientDatabase().get_clients_by_name(user):
-            blacklist = self.config.get("blacklist", dict())
-            password = self.config.get("password", os.urandom(16).hex())
-            access_key = self.config.get("access_key", os.urandom(16).hex())
-
-            ClientDatabase().add_client(user,
-                                        key=access_key,
-                                        blacklist=blacklist,
-                                        password=password)
-            LOG.info(f"Created new user: {user}, pw:{password}, key:{access_key}")
+        with ClientDatabase() as db:
+            if not db.get_clients_by_name(user):
+                blacklist = self.config.get("blacklist", dict())
+                password = self.config.get("password", os.urandom(16).hex())
+                access_key = self.config.get("access_key",
+                                             os.urandom(16).hex())
+                db.add_client(user,
+                              key=access_key,
+                              blacklist=blacklist,
+                              password=password)
+                LOG.info(f"Created new user: {user}"
+                         f", pw:{password}, key:{access_key}")
     
     def shutdown(self):
         super().shutdown()
